@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -80,13 +81,66 @@ export class ProductsService {
   }
 
   async getProducts(dto: GetProductsDto) {
-    const { page, limit, categoryId } = dto;
+    const {
+      page,
+      limit,
+      categoryId,
+      search,
+      minPrice,
+      maxPrice,
+      sortBy,
+      sortOrder,
+    } = dto;
 
     const skip = (page - 1) * limit;
 
+    if (
+      minPrice !== undefined &&
+      maxPrice !== undefined &&
+      minPrice > maxPrice
+    ) {
+      throw new BadRequestException(
+        'Minimum price cannot exceed maximum price',
+      );
+    }
+
     const where = {
       isActive: true,
+
       ...(categoryId ? { categoryId } : {}),
+
+      ...(search
+        ? {
+            OR: [
+              {
+                name: {
+                  contains: search,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                brand: {
+                  contains: search,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                description: {
+                  contains: search,
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+      ...(minPrice !== undefined || maxPrice !== undefined
+        ? {
+            priceInPaise: {
+              ...(minPrice !== undefined ? { gte: minPrice } : {}),
+              ...(maxPrice !== undefined ? { lte: maxPrice } : {}),
+            },
+          }
+        : {}),
     };
 
     const [products, total] = await Promise.all([
@@ -94,9 +148,12 @@ export class ProductsService {
         where,
         skip,
         take: limit,
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy:
+          sortBy === 'price'
+            ? { priceInPaise: sortOrder ?? 'asc' }
+            : sortBy === 'name'
+              ? { name: sortOrder ?? 'asc' }
+              : { createdAt: sortOrder ?? 'desc' },
         include: {
           category: true,
           inventory: true,
