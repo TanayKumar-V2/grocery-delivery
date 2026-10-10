@@ -16,6 +16,7 @@ model User {
   isActive     Boolean   @default(true)
   cart         Cart?
   addresses    Address[]
+  orders       Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -58,6 +59,8 @@ model Product {
   weightGrams Int?
 
   cartItems CartItem[]
+
+  orderItems OrderItem[]
 
   isActive Boolean @default(true)
 
@@ -130,6 +133,8 @@ model Address {
   state        String
   postalCode   String
 
+  orders Order[]
+
   latitude  Float?
   longitude Float?
 
@@ -141,4 +146,148 @@ model Address {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  PACKING
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  EXPIRED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  COD
+}
+
+model Order {
+  id          String @id @default(cuid())
+  orderNumber String @unique
+
+  userId    String
+  addressId String?
+
+  payments      Payment[]
+  expiresAt     DateTime?
+  status        OrderStatus   @default(PENDING_PAYMENT)
+  paymentStatus PaymentStatus @default(PENDING)
+  paymentMethod PaymentMethod @default(RAZORPAY)
+
+  subtotalInPaise    Int
+  discountInPaise    Int @default(0)
+  deliveryFeeInPaise Int @default(0)
+  taxInPaise         Int @default(0)
+  totalInPaise       Int
+
+  recipientName String
+  phone         String
+  addressLine1  String
+  addressLine2  String?
+  landmark      String?
+  city          String
+  state         String
+  postalCode    String
+
+  latitude  Float?
+  longitude Float?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  address Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
+
+  items OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([paymentStatus])
+  @@index([status, expiresAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+
+  productName String
+  sku         String
+  unit        String
+
+  unitPriceInPaise Int
+  quantity         Int
+  lineTotalInPaise Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+enum GatewayPaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+model Payment {
+  id      String @id @default(cuid())
+  orderId String
+
+  provider          String  @default("RAZORPAY")
+  providerOrderId   String? @unique
+  providerPaymentId String? @unique
+
+  amountInPaise Int
+  currency      String               @default("INR")
+  status        GatewayPaymentStatus @default(CREATED)
+
+  signatureVerified Boolean   @default(false)
+  capturedAt        DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  webhookEvents PaymentWebhookEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentWebhookEvent {
+  id        String  @id @default(cuid())
+  eventId   String? @unique
+  eventType String
+  payload   Json
+
+  signatureVerified Boolean   @default(false)
+  processed         Boolean   @default(false)
+  processedAt       DateTime?
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([processed, createdAt])
 }
