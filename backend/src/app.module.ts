@@ -10,9 +10,10 @@ import { CartModule } from './cart/cart.module.js';
 import { AddressesModule } from './addresses/addresses.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { ScheduleModule } from '@nestjs/schedule';
+import { PaymentsModule } from './payments/payments.module.js';
 
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, AdminModule, ProductsModule, CategoriesModule, CartModule, AddressesModule, OrdersModule,ScheduleModule.forRoot()],
+  imports: [PrismaModule, UsersModule, AuthModule, AdminModule, ProductsModule, CategoriesModule, CartModule, AddressesModule, OrdersModule,ScheduleModule.forRoot(), PaymentsModule],
   controllers: [AppController],
   providers: [],
 })
