@@ -141,6 +141,7 @@ export class CartService {
 
       const unitPriceInPaise =
         product.discountPriceInPaise !== null &&
+        product.discountPriceInPaise > 0 &&
         product.discountPriceInPaise < product.priceInPaise
           ? product.discountPriceInPaise
           : product.priceInPaise;

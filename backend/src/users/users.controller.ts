@@ -12,10 +12,20 @@ import { RolesGuard } from '../auth/guards/roles.guards.js';
 import { Roles } from '../auth/decorators/roles.decorators.js';
 import { Role } from '../generated/prisma/enums.js';
 
+interface AuthenticatedRequest extends Request {
+  user: {
+    userId: string;
+    email: string;
+    role: Role;
+  };
+}
+
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @Get('count')
   async getUserCount() {
     const count = await this.usersService.getUserCount();
@@ -27,7 +37,7 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  getMe(@Req() req: Request) {
+  getMe(@Req() req: AuthenticatedRequest) {
     return req.user;
   }
 

@@ -15,6 +15,7 @@ import { GetOrdersDto } from './dto/get-orders.dto.js';
 import { OrdersService } from './orders.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RateLimit } from '../common/decorators/rate-limit.decorator.js';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -30,6 +31,7 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post()
+  @RateLimit(20, 60)
   async createOrder(
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateOrderDto,
@@ -38,6 +40,7 @@ export class OrdersController {
   }
 
   @Patch(':id/cancel')
+  @RateLimit(20, 60)
   async cancelOrder(
     @Req() req: AuthenticatedRequest,
     @Param('id') orderId: string,

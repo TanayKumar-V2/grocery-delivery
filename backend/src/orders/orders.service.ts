@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -13,6 +14,8 @@ import { GetOrdersDto } from './dto/get-orders.dto.js';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -66,6 +69,10 @@ export class OrdersService {
         const product = item.product;
         const inventory = product.inventory;
 
+        if (item.quantity <= 0) {
+          throw new BadRequestException(`Invalid quantity for ${product.name}`);
+        }
+
         if (!product.isActive) {
           throw new BadRequestException(
             `${product.name} is no longer available`,
@@ -111,7 +118,12 @@ export class OrdersService {
         });
       }
 
-      for (const item of cart.items) {
+      // Sort items deterministically by productId to prevent deadlocks across concurrent transactions
+      const sortedCartItems = [...cart.items].sort((a, b) =>
+        a.productId.localeCompare(b.productId),
+      );
+
+      for (const item of sortedCartItems) {
         const updatedRows = await tx.$executeRaw`
           UPDATE "Inventory"
           SET
@@ -207,6 +219,7 @@ export class OrdersService {
       };
     });
   }
+
   async cancelPendingOrder(userId: string, orderId: string) {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
@@ -263,7 +276,12 @@ export class OrdersService {
         );
       }
 
-      for (const item of order.items) {
+      // Sort items deterministically to avoid deadlocks
+      const sortedItems = [...order.items].sort((a, b) =>
+        (a.productId ?? '').localeCompare(b.productId ?? ''),
+      );
+
+      for (const item of sortedItems) {
         if (!item.productId) {
           continue;
         }
@@ -292,6 +310,7 @@ export class OrdersService {
       };
     });
   }
+
   async getMyOrders(userId: string, dto: GetOrdersDto) {
     const { page, limit } = dto;
     const skip = (page - 1) * limit;
@@ -350,6 +369,7 @@ export class OrdersService {
       },
     };
   }
+
   async expirePendingOrders() {
     const now = new Date();
 
@@ -369,61 +389,72 @@ export class OrdersService {
     let expiredCount = 0;
 
     for (const candidate of expiredCandidates) {
-      await this.prisma.$transaction(async (tx) => {
-        const result = await tx.order.updateMany({
-          where: {
-            id: candidate.id,
-            status: 'PENDING_PAYMENT',
-            paymentStatus: 'PENDING',
-            expiresAt: {
-              lte: now,
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const result = await tx.order.updateMany({
+            where: {
+              id: candidate.id,
+              status: 'PENDING_PAYMENT',
+              paymentStatus: 'PENDING',
+              expiresAt: {
+                lte: now,
+              },
             },
-          },
-          data: {
-            status: 'CANCELLED',
-            paymentStatus: 'EXPIRED',
-          },
-        });
+            data: {
+              status: 'CANCELLED',
+              paymentStatus: 'EXPIRED',
+            },
+          });
 
-        if (result.count !== 1) {
-          return;
-        }
-
-        const items = await tx.orderItem.findMany({
-          where: {
-            orderId: candidate.id,
-          },
-          select: {
-            productId: true,
-            productName: true,
-            quantity: true,
-          },
-        });
-
-        for (const item of items) {
-          if (!item.productId) {
-            continue;
+          if (result.count !== 1) {
+            return;
           }
 
-          const releasedRows = await tx.$executeRaw`
-          UPDATE "Inventory"
-          SET
-            "reservedQuantity" = "reservedQuantity" - ${item.quantity},
-            "updatedAt" = NOW()
-          WHERE
-            "productId" = ${item.productId}
-            AND "reservedQuantity" >= ${item.quantity}
-        `;
+          const items = await tx.orderItem.findMany({
+            where: {
+              orderId: candidate.id,
+            },
+            select: {
+              productId: true,
+              productName: true,
+              quantity: true,
+            },
+          });
 
-          if (releasedRows !== 1) {
-            throw new Error(
-              `Could not release reserved stock for ${item.productName}`,
-            );
+          const sortedItems = [...items].sort((a, b) =>
+            (a.productId ?? '').localeCompare(b.productId ?? ''),
+          );
+
+          for (const item of sortedItems) {
+            if (!item.productId) {
+              continue;
+            }
+
+            const releasedRows = await tx.$executeRaw`
+            UPDATE "Inventory"
+            SET
+              "reservedQuantity" = "reservedQuantity" - ${item.quantity},
+              "updatedAt" = NOW()
+            WHERE
+              "productId" = ${item.productId}
+              AND "reservedQuantity" >= ${item.quantity}
+          `;
+
+            if (releasedRows !== 1) {
+              throw new Error(
+                `Could not release reserved stock for ${item.productName}`,
+              );
+            }
           }
-        }
 
-        expiredCount++;
-      });
+          expiredCount++;
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to process expired order ${candidate.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
     }
 
     return {

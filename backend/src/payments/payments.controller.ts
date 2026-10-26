@@ -15,6 +15,7 @@ import type { RawBodyRequest, Request } from '@nestjs/common';
 import { PaymentsService } from './payments.service.js';
 import { VerifyPaymentDto } from './dto/verify-payment.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RateLimit } from '../common/decorators/rate-limit.decorator.js';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -31,6 +32,7 @@ export class PaymentsController {
   ) {}
 
   @UseGuards(JwtAuthGuard)
+  @RateLimit(20, 60)
   @Post('orders/:orderId')
   async createGatewayOrder(
     @Req() req: AuthenticatedRequest,
@@ -43,6 +45,7 @@ export class PaymentsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @RateLimit(20, 60)
   @Post('verify')
   async verifyPayment(
     @Req() req: AuthenticatedRequest,
@@ -70,7 +73,7 @@ export class PaymentsController {
     return this.paymentsService.handleWebhook(
       req.rawBody,
       signature ?? '',
-      eventId ?? '',
+      eventId,
     );
   }
 }
